@@ -17,11 +17,14 @@ import (
 )
 
 var writeTests = []struct {
-	Input   [][]string
-	Output  string
-	Error   error
-	UseCRLF bool
-	Comma   rune
+	Input      [][]string
+	Output     string
+	Error      error
+	UseCRLF    bool
+	Comma      rune
+	Quote      rune
+	QuoteEmpty bool
+	QuoteAll   bool
 }{
 	{Input: [][]string{{"abc"}}, Output: "abc\n"},
 	{Input: [][]string{{"abc"}}, Output: "abc\r\n", UseCRLF: true},
@@ -52,6 +55,18 @@ var writeTests = []struct {
 	{Input: [][]string{{"a", "a", ""}}, Output: "a|a|\n", Comma: '|'},
 	{Input: [][]string{{",", ",", ""}}, Output: ",|,|\n", Comma: '|'},
 	{Input: [][]string{{"foo"}}, Comma: '"', Error: errInvalidDelim},
+	// Test Quote.
+	{Input: [][]string{{"abc,def"}}, Output: `|abc,def|` + "\n", Quote: '|'},
+	{Input: [][]string{{`a|b`}}, Output: `|a||b|` + "\n", Quote: '|'},
+	{Input: [][]string{{`|a|b|`}}, Output: `|||a||b|||` + "\n", Quote: '|'},
+	// Test QuoteAll.
+	{Input: [][]string{{"abc", "def"}}, Output: `"abc","def"` + "\n", QuoteAll: true},
+	{Input: [][]string{{"abc", "def"}}, Output: "abc,def\n", QuoteAll: false},
+	{Input: [][]string{{"a,bc", "de\nf"}}, Output: `"a,bc","de` + "\n" + `f"` + "\n", QuoteAll: true},
+	{Input: [][]string{{"abc", "def"}, {"uvw", "xyz"}}, Output: `"abc","def"` + "\n" + `"uvw","xyz"` + "\n", QuoteAll: true},
+	// Test QuoteEmpty.
+	{Input: [][]string{{"", "abc"}}, Output: `"",abc` + "\n", QuoteEmpty: true},
+	{Input: [][]string{{"", "abc"}}, Output: `,abc` + "\n", QuoteEmpty: false},
 }
 
 func TestWrite(t *testing.T) {
@@ -59,8 +74,13 @@ func TestWrite(t *testing.T) {
 		b := &strings.Builder{}
 		f := NewWriter(b)
 		f.UseCRLF = tt.UseCRLF
+		f.QuoteAll = tt.QuoteAll
+		f.QuoteEmpty = tt.QuoteEmpty
 		if tt.Comma != 0 {
 			f.Comma = tt.Comma
+		}
+		if tt.Quote != 0 {
+			f.Quote = tt.Quote
 		}
 		err := f.WriteAll(tt.Input)
 		if err != tt.Error {

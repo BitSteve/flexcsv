@@ -33,15 +33,19 @@ import (
 // the underlying io.Writer.  Any errors that occurred should
 // be checked by calling the Error method.
 type Writer struct {
-	Comma   rune // Field delimiter (set to ',' by NewWriter)
-	UseCRLF bool // True to use \r\n as the line terminator
-	w       *bufio.Writer
+	Comma      rune // Field delimiter (set to ',' by NewWriter)
+	Quote      rune // Quote character to use (set to '"' by NewWriter)
+	QuoteEmpty bool // True to quote empty fields. This is false by default after Go 1.4
+	QuoteAll   bool // True to quote each csv field
+	UseCRLF    bool // True to use \r\n as the line terminator
+	w          *bufio.Writer
 }
 
 // NewWriter returns a new Writer that writes to w.
 func NewWriter(w io.Writer) *Writer {
 	return &Writer{
 		Comma: ',',
+		Quote: '"',
 		w:     bufio.NewWriter(w),
 	}
 }
@@ -71,12 +75,12 @@ func (w *Writer) Write(record []string) error {
 			continue
 		}
 
-		if err := w.w.WriteByte('"'); err != nil {
+		if _, err := w.w.WriteRune(w.Quote); err != nil {
 			return err
 		}
 		for len(field) > 0 {
 			// Search for special characters.
-			i := strings.IndexAny(field, "\"\r\n")
+			i := strings.IndexAny(field, "\r\n"+string(w.Quote))
 			if i < 0 {
 				i = len(field)
 			}
@@ -91,8 +95,8 @@ func (w *Writer) Write(record []string) error {
 			if len(field) > 0 {
 				var err error
 				switch field[0] {
-				case '"':
-					_, err = w.w.WriteString(`""`)
+				case byte(w.Quote):
+					_, err = w.w.WriteString(string([]rune{w.Quote, w.Quote}))
 				case '\r':
 					if !w.UseCRLF {
 						err = w.w.WriteByte('\r')
@@ -110,7 +114,7 @@ func (w *Writer) Write(record []string) error {
 				}
 			}
 		}
-		if err := w.w.WriteByte('"'); err != nil {
+		if _, err := w.w.WriteRune(w.Quote); err != nil {
 			return err
 		}
 	}
@@ -160,8 +164,17 @@ func (w *Writer) WriteAll(records [][]string) error {
 // of Microsoft Excel and Google Drive.
 // For Postgres, quote the data terminating string `\.`.
 func (w *Writer) fieldNeedsQuotes(field string) bool {
-	if field == "" {
+	// If quotes are enforced by configuration, always return true
+	if w.QuoteAll {
+		return true
+	}
+
+	if w.Quote == 0 {
 		return false
+	}
+
+	if len(field) == 0 {
+		return w.QuoteEmpty
 	}
 
 	if field == `\.` {
@@ -171,12 +184,12 @@ func (w *Writer) fieldNeedsQuotes(field string) bool {
 	if w.Comma < utf8.RuneSelf {
 		for i := 0; i < len(field); i++ {
 			c := field[i]
-			if c == '\n' || c == '\r' || c == '"' || c == byte(w.Comma) {
+			if c == '\n' || c == '\r' || c == byte(w.Quote) || c == byte(w.Comma) {
 				return true
 			}
 		}
 	} else {
-		if strings.ContainsRune(field, w.Comma) || strings.ContainsAny(field, "\"\r\n") {
+		if strings.ContainsRune(field, w.Comma) || strings.ContainsRune(field, w.Quote) || strings.ContainsAny(field, "\"\r\n") {
 			return true
 		}
 	}
